@@ -81,7 +81,9 @@ class GridCell:
         self.cache_version = self._grid.cache_version
         return with_size
 
-    def cost(self, next_cell):
+    def cost(self, next_cell, max_cost):
+        if self.is_obstacle or next_cell.is_obstacle:
+            return max_cost
         current_coord = self._coordinate
         next_coord = next_cell.coord
         return math.hypot(next_coord[0] - current_coord[0], next_coord[1] - current_coord[1])
@@ -129,7 +131,7 @@ class Grid:
         cost_so_far = {start_cell: 0}
         came_from[start_cell] = None
 
-        if start_cell.cost(goal_cell) > max_cost:
+        if start_cell.cost(goal_cell, max_cost) >= max_cost:
             return {}, {}
 
         while not frontier.empty():
@@ -140,7 +142,9 @@ class Grid:
 
             for next_cell_coord in current.neighbors(player_size):
                 next_cell = self.get_cell(next_cell_coord)
-                new_cost = cost_so_far[current] + current.cost(next_cell)
+                new_cost = cost_so_far[current] + current.cost(next_cell, max_cost)
+                if new_cost >= max_cost:
+                    continue
                 if next_cell not in cost_so_far or new_cost < cost_so_far[next_cell]:
                     cost_so_far[next_cell] = new_cost
                     priority = new_cost + self.heuristic(goal_cell, next_cell)

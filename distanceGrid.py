@@ -31,22 +31,22 @@ class DistanceGridCell:
 
         # by default all edges has 8 connections
         self.edges = [
-            (x_cord, y_cord + 1),
-            (x_cord + 1, y_cord + 1),
-            (x_cord + 1, y_cord),
-            (x_cord + 1, y_cord - 1),
-            (x_cord, y_cord - 1),
-            (x_cord - 1, y_cord - 1),
-            (x_cord - 1, y_cord),
-            (x_cord - 1, y_cord + 1),
+            (-1, (x_cord, y_cord + 1)),
+            (-1, (x_cord + 1, y_cord + 1)),
+            (-1, (x_cord + 1, y_cord)),
+            (0, (x_cord + 1, y_cord - 1)),
+            (0, (x_cord, y_cord - 1)),
+            (0, (x_cord - 1, y_cord - 1)),
+            (0, (x_cord - 1, y_cord)),
+            (0, (x_cord - 1, y_cord + 1)),
         ]
 
         # small edges is edges without the diagonals and is used for small characters
         self.small_edges = [
-            (x_cord, y_cord + 1),
-            (x_cord, y_cord - 1),
-            (x_cord + 1, y_cord),
-            (x_cord - 1, y_cord),
+            (0, (x_cord, y_cord + 1)),
+            (0, (x_cord, y_cord - 1)),
+            (0, (x_cord + 1, y_cord)),
+            (0, (x_cord - 1, y_cord)),
         ]
 
     @property
@@ -71,7 +71,6 @@ class DistanceGridCell:
                     if x == 0 and y == 0:
                         continue
 
-                    cells = []
                     if x > 0 and y > 0:
                         cells = [
                             grid.get_cell((xc + x, yc + y)),
@@ -101,10 +100,9 @@ class DistanceGridCell:
     def neighbors(self, player_size):
         self.update_wall_dist(player_size)
 
-        if self.wall_dist < player_size:
+        if self.wall_dist < player_size / 2.0:
             return []
 
-        edges = []
         if player_size == 1:
             edges = self.small_edges
         else:
@@ -112,15 +110,17 @@ class DistanceGridCell:
 
         grid = self._grid
         with_obstacles = []
-        for edge in edges:
+        for offset, edge in edges:
             edge_cell = grid.get_cell(edge)
             edge_cell.update_wall_dist(player_size)
-            if edge_cell.wall_dist > player_size:
+            if edge_cell.wall_dist > player_size / 2.0:
                 with_obstacles.append(edge)
 
         return with_obstacles
 
-    def cost(self, next_cell):
+    def cost(self, next_cell, max_cost):
+        if self.is_obstacle or next_cell.is_obstacle:
+            return max_cost
         return self.distance(next_cell)
 
     def distance(self, other_cell):
@@ -171,7 +171,7 @@ class DistanceGrid:
         cost_so_far = {start_cell: 0}
         came_from[start_cell] = None
 
-        if start_cell.cost(goal_cell) > max_cost:
+        if start_cell.cost(goal_cell, max_cost) >= max_cost:
             return {}, {}
 
         while not frontier.empty():
@@ -182,8 +182,8 @@ class DistanceGrid:
 
             for next_cell_coord in current.neighbors(player_size):
                 next_cell = self.get_cell(next_cell_coord)
-                new_cost = cost_so_far[current] + current.cost(next_cell)
-                if new_cost > max_cost:
+                new_cost = cost_so_far[current] + current.cost(next_cell, max_cost)
+                if new_cost >= max_cost:
                     continue
                 if next_cell not in cost_so_far or new_cost < cost_so_far[next_cell]:
                     cost_so_far[next_cell] = new_cost
@@ -214,7 +214,10 @@ class DistanceGrid:
         return path, cost.get(self.get_cell(goal), 0)
 
     def set_cell_is_obstacle(self, coord, is_obstacle):
-        self.get_cell(coord).wall_dist = 0
+        if is_obstacle:
+            self.get_cell(coord).wall_dist = 0
+        else:
+            self.get_cell(coord).wall_dist = -1
         self.cache_version += 1
 
     def update_player_size(self):

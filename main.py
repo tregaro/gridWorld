@@ -1,9 +1,11 @@
 import cocos
 import pyglet.window.mouse
-from pathCanvas import PathCanvas
-from gridCanvas import GridCanvas
+from cocos import batch
 
-use_distance_grid = False
+from gridCanvas import GridCanvas
+from pathCanvas import PathCanvas
+
+use_distance_grid = True
 if use_distance_grid:
     from distanceGrid import DistanceGrid as Grid
 else:
@@ -69,7 +71,7 @@ class GridLayer(cocos.layer.Layer):
 
         if is_obstructed:
             obstacle = cocos.sprite.Sprite(
-                image='Sprites/white.png',
+                image='assets/white.png',
                 scale=g_grid_size
             )
             obstacle.position = self.grid_to_world(grid_pos)
@@ -89,16 +91,10 @@ class GridLayer(cocos.layer.Layer):
 
     def set_start_pos(self, position):
         if self.start_square is None:
-            if use_distance_grid:
-                self.start_square = cocos.layer.ColorLayer(
-                    0, 200, 0, 255,
-                    g_grid_size * g_player_size * 2,
-                    g_grid_size * g_player_size * 2)
-            else:
-                self.start_square = cocos.layer.ColorLayer(
-                    0, 200, 0, 255,
-                    g_grid_size * g_player_size,
-                    g_grid_size * g_player_size)
+            self.start_square = cocos.layer.ColorLayer(
+                0, 200, 0, 255,
+                g_grid_size * g_player_size,
+                g_grid_size * g_player_size)
             self.add(self.start_square)
 
         # align to grid
@@ -200,6 +196,8 @@ class MouseDisplay(cocos.layer.Layer):
         elif self.state == 'path':
             if buttons & pyglet.window.mouse.LEFT:
                 self._grid.set_start_pos(mouse_pos)
+            elif buttons & pyglet.window.mouse.RIGHT:
+                self._grid.set_end_pos(mouse_pos)
 
         self.update_text()
 
@@ -252,7 +250,7 @@ class MouseDisplay(cocos.layer.Layer):
 
 
 if __name__ == "__main__":
-    director.init(fullscreen=True)
+    director.init(fullscreen=False)
 
     grid = GridLayer()
     mouse_display = MouseDisplay(grid)

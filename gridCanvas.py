@@ -1,5 +1,5 @@
-from cocos.draw import Canvas
 from cocos.director import director
+from cocos.draw import Canvas
 
 
 class GridCanvas(Canvas):
@@ -13,10 +13,10 @@ class GridCanvas(Canvas):
 
         self.set_color(line_color)
 
-        for x_pos in range(0, win_size[0], self._grid_cell_size):
+        for x_pos in range(0, win_size[0] + self._grid_cell_size, self._grid_cell_size):
             self.move_to((x_pos, 0))
             self.line_to((x_pos, win_size[1]))
 
-        for y_pos in range(0, win_size[1], self._grid_cell_size):
+        for y_pos in range(0, win_size[1] + self._grid_cell_size, self._grid_cell_size):
             self.move_to((0, y_pos))
             self.line_to((win_size[0], y_pos))
