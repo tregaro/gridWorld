@@ -1,7 +1,9 @@
 import cocos
 import pyglet.window.mouse
-from pathCanvas import PathCanvas
+from cocos import batch
+
 from gridCanvas import GridCanvas
+from pathCanvas import PathCanvas
 
 use_distance_grid = False
 if use_distance_grid:
@@ -69,7 +71,7 @@ class GridLayer(cocos.layer.Layer):
 
         if is_obstructed:
             obstacle = cocos.sprite.Sprite(
-                image='Sprites/white.png',
+                image='assets/white.png',
                 scale=g_grid_size
             )
             obstacle.position = self.grid_to_world(grid_pos)
