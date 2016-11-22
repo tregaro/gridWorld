@@ -1,5 +1,5 @@
-from cocos.draw import Canvas
 from cocos.director import director
+from cocos.draw import Canvas
 
 
 class GridCanvas(Canvas):
@@ -11,6 +11,7 @@ class GridCanvas(Canvas):
         win_size = director.get_window_size()
         line_color = (50, 50, 50, 255)
 
+        self.set_stroke_width(1)
         self.set_color(line_color)
 
         for x_pos in range(0, win_size[0], self._grid_cell_size):
