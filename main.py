@@ -13,7 +13,7 @@ else:
 
 director = cocos.director.director
 g_player_size = 1
-g_grid_size = 16
+g_grid_size = 8
 
 
 class GridLayer(cocos.layer.Layer):
@@ -22,6 +22,9 @@ class GridLayer(cocos.layer.Layer):
 
         self.start_square = None
         self.end_square = None
+
+        bg = cocos.sprite.Sprite('assets/grid.png', anchor=(0, 0))
+        self.add(bg)
 
         # Canvas that draws the grid
         self.add(GridCanvas(g_grid_size))
@@ -250,7 +253,11 @@ class MouseDisplay(cocos.layer.Layer):
 
 
 if __name__ == "__main__":
-    director.init(fullscreen=False)
+    director.init(
+        fullscreen=False,
+        width=1036,
+        height=510
+    )
 
     grid = GridLayer()
     mouse_display = MouseDisplay(grid)
