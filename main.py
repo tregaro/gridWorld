@@ -1,19 +1,21 @@
 import cocos
 import pyglet.window.mouse
 from cocos import batch
+from cocos import euclid
 
-from gridCanvas import GridCanvas
 from pathCanvas import PathCanvas
 
-use_distance_grid = True
+use_distance_grid = False
 if use_distance_grid:
     from distanceGrid import DistanceGrid as Grid
 else:
     from grid import Grid
 
+# https://github.com/ezag/pyeuclid/blob/master/euclid.rst - useful doc
+
 director = cocos.director.director
 g_player_size = 1
-g_grid_size = 8
+g_grid_size = 16
 
 
 class GridLayer(cocos.layer.Layer):
@@ -27,7 +29,7 @@ class GridLayer(cocos.layer.Layer):
         self.add(bg)
 
         # Canvas that draws the grid
-        self.add(GridCanvas(g_grid_size))
+        # self.add(GridCanvas(g_grid_size))
 
         # Canvas to draw paths
         self.path_canvas = PathCanvas()
@@ -42,11 +44,37 @@ class GridLayer(cocos.layer.Layer):
         self._grid = Grid()
         self.path_cost = 0
 
+        # Load obstacles from image
+        bg_texture_data = bg.image.get_image_data()
+        data = bg_texture_data.get_data('RGB', bg.width * 3)
+        valid_colors = [
+            [192, 192, 191],
+            [102, 112, 102],
+            [91, 91, 91],
+            [168, 168, 168],
+        ]
+
+        for x in range(g_grid_size / 2, bg.width, g_grid_size):
+            for y in range(g_grid_size / 2, bg.height, g_grid_size):
+                pos = (bg.width * y + x) * 3
+                rgb = map(ord, data[pos:pos + 3])
+                valid = False
+                limit = 2
+                for valid_color in valid_colors:
+                    if valid:
+                        break
+                    valid = True
+                    for i in range(0, 3):
+                        valid = valid and abs(valid_color[i] - rgb[i]) < limit
+
+                if not valid:
+                    self.set_grid_obstructed((x, y), True, False)
+
     def update_path(self):
         path = self.get_start_to_end_path()
         path = [self.grid_to_world(grid_pos) for grid_pos in path]
-        path = [(x + g_grid_size * g_player_size/2.0,
-                 y + g_grid_size * g_player_size/2.0) for x, y in path]
+        path = [(x + g_grid_size * g_player_size / 2.0,
+                 y + g_grid_size * g_player_size / 2.0) for x, y in path]
         self.path_canvas.set_path(path)
 
     @staticmethod
@@ -89,10 +117,12 @@ class GridLayer(cocos.layer.Layer):
             self.update_path()
 
     def toggle_grid_obstacle(self, position):
+        position = self.get_world_inverse() * euclid.Point2(position[0], position[1])
         # Toggle this obstacle
         self.set_grid_obstructed(position, not self.get_grid_obstacle(position))
 
     def set_start_pos(self, position):
+        position = self.get_world_inverse() * euclid.Point2(position[0], position[1])
         if self.start_square is None:
             self.start_square = cocos.layer.ColorLayer(
                 0, 200, 0, 255,
@@ -107,6 +137,7 @@ class GridLayer(cocos.layer.Layer):
             self.update_path()
 
     def set_end_pos(self, position):
+        position = self.get_world_inverse() * euclid.Point2(position[0], position[1])
         if self.end_square is None:
             self.end_square = cocos.layer.ColorLayer(
                 200, 0, 0, 255,
@@ -162,8 +193,7 @@ class GridLayer(cocos.layer.Layer):
 
 
 class MouseDisplay(cocos.layer.Layer):
-
-    is_event_handler = True     #: enable director.window events
+    is_event_handler = True  #: enable director.window events
 
     def __init__(self, grid_layer):
         super(MouseDisplay, self).__init__()
@@ -171,6 +201,8 @@ class MouseDisplay(cocos.layer.Layer):
         win_size = director.get_window_size()
 
         self._grid = grid_layer
+        self._drag_start = (0, 0)
+        self._grid_pos_start = (0, 0)
         self.state = 'path'
 
         self.text_bg = cocos.layer.ColorLayer(0, 0, 0, 255, win_size[0], 23)
@@ -185,12 +217,27 @@ class MouseDisplay(cocos.layer.Layer):
         self.current_grid_obstructed = False
         self.keys_pressed = set()
 
+    def on_mouse_scroll(self, x, y, dx, dy):
+        self.scale = max(self.scale + dy * 0.5, 0.1)
+        self._grid.scale = self.scale
+        pass
+
+    def on_mouse_leave(self, x, y):
+        pass
+
+    def on_mouse_enter(self, x, y):
+        pass
+
     def on_mouse_motion(self, x, y, dx, dy):
         pass
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         mouse_pos = director.get_virtual_coordinates(x, y)
-        if self.state == 'edit':
+        if buttons & pyglet.window.mouse.MIDDLE:
+            drag_offset = tuple(mouse_pos[i] - self._drag_start[i] for i in range(0, 2))
+            self._grid.position = tuple(self._grid_pos_start[i] + drag_offset[i] for i in range(0, 2))
+            self.position = self._grid.position
+        elif self.state == 'edit':
             if buttons & pyglet.window.mouse.LEFT:
                 self._grid.set_grid_obstructed(
                     mouse_pos,
@@ -206,7 +253,10 @@ class MouseDisplay(cocos.layer.Layer):
 
     def on_mouse_press(self, x, y, buttons, modifiers):
         mouse_pos = director.get_virtual_coordinates(x, y)
-        if self.state == 'path':
+        if buttons & pyglet.window.mouse.MIDDLE:
+            self._drag_start = mouse_pos
+            self._grid_pos_start = self._grid.position
+        elif self.state == 'path':
             if buttons & pyglet.window.mouse.LEFT:
                 self._grid.set_start_pos(mouse_pos)
             elif buttons & pyglet.window.mouse.RIGHT:
