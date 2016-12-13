@@ -46,7 +46,7 @@ class FogOfWarNode(cocos.cocosnode.CocosNode):
         # Batched node to draw fog
         self.fog_batch_node = BatchNode()
         self.add(self.fog_batch_node)
-        self.fog_squares = defaultdict(lambda: False)
+        self.fog_squares = defaultdict(lambda: True)
         self.fog_grid = {}
 
         self.update_fog_grid()
@@ -65,7 +65,7 @@ class FogOfWarNode(cocos.cocosnode.CocosNode):
                     fog = cocos.sprite.Sprite(
                         image=fog_img,
                         scale=g_grid_size,
-                        color=(128, 128, 128),
+                        color=(188, 188, 188),
                         opacity=255,
                     )
                     self.fog_grid[world_grid_pos] = fog
@@ -74,10 +74,27 @@ class FogOfWarNode(cocos.cocosnode.CocosNode):
                 fog = self.fog_grid[world_grid_pos]
                 world_pos = grid_to_world(world_grid_pos)
                 fog.position = align_pos_to_grid(self.point_to_local(world_pos))
-                fog.visible = not self.fog_squares[world_to_grid(fog.position)]
+
+                # Visible if anything is visible within a radius
+                fog_grid_pos = world_to_grid(fog.position)
+                fog_visible = self.fog_squares[fog_grid_pos]
+                if fog_visible:
+                    radius = 4
+                    square_radius = radius * radius
+                    for radius_x in xrange(-radius + 1, radius):
+                        if not fog_visible:
+                            break
+                        for radius_y in xrange(-radius + 1, radius):
+                            if (abs(radius_x) * abs(radius_x) + abs(radius_y) * abs(radius_y)) <= square_radius:
+                                new_fog_grid_pos = tuple(fog_grid_pos + Point2(radius_x, radius_y))
+                                fog_visible = self.fog_squares[new_fog_grid_pos]
+                                if not fog_visible:
+                                    break
+
+                fog.visible = fog_visible
 
     def set_grid_pos_visible(self, grid_pos, is_visible):
-        self.fog_squares[tuple(grid_pos)] = is_visible
+        self.fog_squares[tuple(grid_pos)] = not is_visible
 
 
 class GameLayer(cocos.layer.Layer):
@@ -92,7 +109,6 @@ class GameLayer(cocos.layer.Layer):
 
         # Fog of war Node
         self.fow = FogOfWarNode()
-        self.add(self.fow)
 
         # Update camera
         self.update_camera()
@@ -133,6 +149,8 @@ class GameLayer(cocos.layer.Layer):
                 if not valid:
                     self.set_grid_obstructed((x, y), True)
 
+        self.add(self.fow)
+
     def on_key_press(self, key, modifiers):
         self.keys_pressed.add(key)
 
@@ -150,7 +168,17 @@ class GameLayer(cocos.layer.Layer):
             new_pos = Point2(grid_pos[0], grid_pos[1]) + move_key_map[key]
             if self.is_valid_player_grid_pos(new_pos):
                 self.player.position = grid_to_world(new_pos)
-                self.fow.set_grid_pos_visible(new_pos, True)
+
+                # Do circle around player
+                radius = 10
+                square_radius = radius * radius
+                for x in xrange(-radius + 1, radius):
+                    for y in xrange(-radius + 1, radius):
+                        if (x * x + y * y) <= square_radius:
+                            hit, hit_pos = self.raytrace(new_pos, new_pos + (x, y))
+                            if not hit:
+                                self.fow.set_grid_pos_visible(new_pos + (x, y), True)
+
                 self.update_camera()
 
     def update_camera(self):
@@ -256,9 +284,9 @@ class DebugConsole(cocos.layer.Layer):
 
 if __name__ == "__main__":
     director.init(
-        fullscreen=False,
-        width=1036,
-        height=510
+        fullscreen=True,
+        # width=1036,
+        # height=510
     )
     director.show_FPS = True
 
