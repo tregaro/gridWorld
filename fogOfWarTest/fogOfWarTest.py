@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 
 import cocos
 import pyglet
@@ -38,6 +39,47 @@ class PlayerNode(cocos.cocosnode.CocosNode):
         self.player = player
 
 
+class FogOfWarNode(cocos.cocosnode.CocosNode):
+    def __init__(self):
+        super(FogOfWarNode, self).__init__()
+
+        # Batched node to draw fog
+        self.fog_batch_node = BatchNode()
+        self.add(self.fog_batch_node)
+        self.fog_squares = defaultdict(lambda: False)
+        self.fog_grid = {}
+
+        self.update_fog_grid()
+
+    def update_fog_grid(self):
+        win_size = director.get_window_size()
+        grid_size = 2 + (win_size[0] / g_grid_size), 2 + (win_size[1] / g_grid_size)
+
+        for x in xrange(grid_size[0]):
+            for y in xrange(grid_size[1]):
+                world_grid_pos = x, y
+
+                if world_grid_pos not in self.fog_grid:
+                    fog_path = os.path.abspath('../assets/white.png')
+                    fog_img = pyglet.image.load(fog_path)
+                    fog = cocos.sprite.Sprite(
+                        image=fog_img,
+                        scale=g_grid_size,
+                        color=(128, 128, 128),
+                        opacity=255,
+                    )
+                    self.fog_grid[world_grid_pos] = fog
+                    self.fog_batch_node.add(fog)
+
+                fog = self.fog_grid[world_grid_pos]
+                world_pos = grid_to_world(world_grid_pos)
+                fog.position = align_pos_to_grid(self.point_to_local(world_pos))
+                fog.visible = not self.fog_squares[world_to_grid(fog.position)]
+
+    def set_grid_pos_visible(self, grid_pos, is_visible):
+        self.fog_squares[tuple(grid_pos)] = is_visible
+
+
 class GameLayer(cocos.layer.Layer):
     is_event_handler = True  #: enable director.window events
 
@@ -47,6 +89,13 @@ class GameLayer(cocos.layer.Layer):
         self.keys_pressed = set()
         self.player = PlayerNode()
         self.add(self.player)
+
+        # Fog of war Node
+        self.fow = FogOfWarNode()
+        self.add(self.fow)
+
+        # Update camera
+        self.update_camera()
 
         bg_path = os.path.abspath("../assets/grid.png")
         bg_img = pyglet.image.load(bg_path)
@@ -101,18 +150,23 @@ class GameLayer(cocos.layer.Layer):
             new_pos = Point2(grid_pos[0], grid_pos[1]) + move_key_map[key]
             if self.is_valid_player_grid_pos(new_pos):
                 self.player.position = grid_to_world(new_pos)
+                self.fow.set_grid_pos_visible(new_pos, True)
+                self.update_camera()
 
-                world_pos = self.point_to_world(self.player.position)
-                win_size = director.get_window_size()
-                padding = 100
-                if world_pos[0] < padding:
-                    self.position += Point2(padding - world_pos[0], 0)
-                elif (win_size[0] - world_pos[0]) < padding:
-                    self.position -= Point2(padding - (win_size[0] - world_pos[0]), 0)
-                if world_pos[1] < padding:
-                    self.position += Point2(0, padding - world_pos[1])
-                elif (win_size[1] - world_pos[1]) < padding:
-                    self.position -= Point2(0, padding - (win_size[1] - world_pos[1]))
+    def update_camera(self):
+        world_pos = self.point_to_world(self.player.position)
+        win_size = director.get_window_size()
+        padding = 100
+        if world_pos[0] < padding:
+            self.position += Point2(padding - world_pos[0], 0)
+        elif (win_size[0] - world_pos[0]) < padding:
+            self.position -= Point2(padding - (win_size[0] - world_pos[0]), 0)
+        if world_pos[1] < padding:
+            self.position += Point2(0, padding - world_pos[1])
+        elif (win_size[1] - world_pos[1]) < padding:
+            self.position -= Point2(0, padding - (win_size[1] - world_pos[1]))
+
+        self.fow.update_fog_grid()
 
     def is_valid_player_grid_pos(self, grid_pos):
         grid_pos = tuple(int(v) for v in grid_pos)
@@ -140,6 +194,31 @@ class GameLayer(cocos.layer.Layer):
             current_obstacle = self.obstacle_squares.get(grid_pos, None)
             self.obstacles_batch_node.remove(current_obstacle)
             del self.obstacle_squares[grid_pos]
+
+    def raytrace(self, grid_pos_start, grid_pos_end):
+        x0, y0 = grid_pos_start
+        x1, y1 = grid_pos_end
+        dx, dy = abs(x1 - x0), abs(y1 - y0)
+        x, y = x0, y0
+        n = 1 + dx + dy
+        x_inc = 1 if (x1 > x0) else -1
+        y_inc = 1 if (y1 > y0) else -1
+        error = dx - dy
+        dx *= 2
+        dy *= 2
+
+        for _ in xrange(n):
+            if (x, y) in self.obstacle_squares:
+                return True, (x, y)  # We hit something
+            if error > 0:
+                x += x_inc
+                error -= dy
+            else:
+                y += y_inc
+                error += dx
+
+        # We hit nothing
+        return False, None
 
 
 class DebugConsole(cocos.layer.Layer):
@@ -181,6 +260,7 @@ if __name__ == "__main__":
         width=1036,
         height=510
     )
+    director.show_FPS = True
 
     director.run(cocos.scene.Scene(
         GameLayer(),
