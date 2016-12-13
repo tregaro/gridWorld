@@ -4,6 +4,7 @@ from collections import defaultdict
 import cocos
 import pyglet
 from cocos.batch import BatchNode
+from cocos.draw import Canvas
 from cocos.euclid import Point2
 
 director = cocos.director.director
@@ -39,15 +40,74 @@ class PlayerNode(cocos.cocosnode.CocosNode):
         self.player = player
 
 
+class FogOfWarCanvas(Canvas):
+    def __init__(self, x, y, fog_squares, cache_size):
+        super(FogOfWarCanvas, self).__init__()
+        self._current_state = fog_squares
+        self._cached_state = defaultdict(lambda: True)
+        self.x = x
+        self.y = y
+        self.cache_size = cache_size
+
+    def needs_update(self):
+        for x in xrange(self.x, self.x + self.cache_size):
+            for y in xrange(self.y, self.y + self.cache_size):
+                world_grid_pos = x, y
+                world_pos = grid_to_world(world_grid_pos)
+                aligned_world_pos = align_pos_to_grid(self.point_to_local(world_pos))
+                fog_grid_pos = world_to_grid(aligned_world_pos)
+                if self._cached_state[fog_grid_pos] != self._current_state[fog_grid_pos]:
+                    return True
+
+        return False
+
+    def render(self):
+        line_color = (50, 50, 50, 255)
+
+        self.set_stroke_width(g_grid_size)
+        self.set_color(line_color)
+        self.set_endcap(cocos.draw.SQUARE_CAP)
+
+        for x in xrange(self.x, self.x + self.cache_size):
+            for y in xrange(self.y, self.y + self.cache_size):
+                world_grid_pos = x, y
+
+                world_pos = grid_to_world(world_grid_pos)
+                aligned_world_pos = align_pos_to_grid(self.point_to_local(world_pos))
+
+                fog_visible = self._current_state[world_grid_pos]
+                self._cached_state[world_grid_pos] = fog_visible
+
+                if fog_visible:
+                    self.move_to(aligned_world_pos + Point2(0, g_grid_size))
+                    self.line_to(aligned_world_pos + Point2(g_grid_size, 0))
+
+
 class FogOfWarNode(cocos.cocosnode.CocosNode):
     def __init__(self):
         super(FogOfWarNode, self).__init__()
 
-        # Batched node to draw fog
-        self.fog_batch_node = BatchNode()
-        self.add(self.fog_batch_node)
         self.fog_squares = defaultdict(lambda: True)
-        self.fog_grid = {}
+        self.fog_squares_screen_space = defaultdict(lambda: True)
+
+        win_size = director.get_window_size()
+        grid_size = 2 + (win_size[0] / g_grid_size), 2 + (win_size[1] / g_grid_size)
+        self.fog_grid = []
+        cache_size = 10
+        for x in xrange(grid_size[0]):
+            for y in xrange(grid_size[1]):
+                if x % cache_size == 0 and y % cache_size == 0:
+                    self.fog_grid.append(
+                        FogOfWarCanvas(
+                            x=x,
+                            y=y,
+                            fog_squares=self.fog_squares_screen_space,
+                            cache_size=cache_size
+                        )
+                    )
+
+        for grid in self.fog_grid:
+            self.add(grid)
 
         self.update_fog_grid()
 
@@ -59,27 +119,15 @@ class FogOfWarNode(cocos.cocosnode.CocosNode):
             for y in xrange(grid_size[1]):
                 world_grid_pos = x, y
 
-                if world_grid_pos not in self.fog_grid:
-                    fog_path = os.path.abspath('../assets/white.png')
-                    fog_img = pyglet.image.load(fog_path)
-                    fog = cocos.sprite.Sprite(
-                        image=fog_img,
-                        scale=g_grid_size,
-                        color=(188, 188, 188),
-                        opacity=255,
-                    )
-                    self.fog_grid[world_grid_pos] = fog
-                    self.fog_batch_node.add(fog)
-
-                fog = self.fog_grid[world_grid_pos]
                 world_pos = grid_to_world(world_grid_pos)
-                fog.position = align_pos_to_grid(self.point_to_local(world_pos))
+                aligned_world_pos = align_pos_to_grid(self.point_to_local(world_pos))
 
                 # Visible if anything is visible within a radius
-                fog_grid_pos = world_to_grid(fog.position)
+                fog_grid_pos = world_to_grid(aligned_world_pos)
                 fog_visible = self.fog_squares[fog_grid_pos]
+
                 if fog_visible:
-                    radius = 4
+                    radius = 2
                     square_radius = radius * radius
                     for radius_x in xrange(-radius + 1, radius):
                         if not fog_visible:
@@ -91,7 +139,11 @@ class FogOfWarNode(cocos.cocosnode.CocosNode):
                                 if not fog_visible:
                                     break
 
-                fog.visible = fog_visible
+                self.fog_squares_screen_space[world_grid_pos] = fog_visible
+
+        for square in self.fog_grid:
+            if square.needs_update():
+                square.free()
 
     def set_grid_pos_visible(self, grid_pos, is_visible):
         self.fog_squares[tuple(grid_pos)] = not is_visible
@@ -170,7 +222,7 @@ class GameLayer(cocos.layer.Layer):
                 self.player.position = grid_to_world(new_pos)
 
                 # Do circle around player
-                radius = 10
+                radius = 20
                 square_radius = radius * radius
                 for x in xrange(-radius + 1, radius):
                     for y in xrange(-radius + 1, radius):
@@ -284,9 +336,9 @@ class DebugConsole(cocos.layer.Layer):
 
 if __name__ == "__main__":
     director.init(
-        fullscreen=True,
-        # width=1036,
-        # height=510
+        fullscreen=False,
+        width=1036,
+        height=510
     )
     director.show_FPS = True
 

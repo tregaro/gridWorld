@@ -1,3 +1,9 @@
+# Keeps state of collision
+# Generates path from a to b
+# Generates possible paths from point with max distance, used to generate path visualization,
+# can be used to show field of view as well.
+
+
 import heapq
 import math
 
