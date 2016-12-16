@@ -8,9 +8,11 @@ from cocos.euclid import Point2
 
 # THINGS to tweak to get different effects
 g_should_trace_walls = True  # If this is False we don't trace against walls for line of sight. Meaning you will see everything withing a radius.
-g_fog_neighbour_radius = 0  # This is the radius that fog is uncovered from visible slots.
-g_player_view_radius = 10  # The radius that the player can see
+g_fog_neighbour_radius = 1  # This is the radius that fog is uncovered from visible slots.
+g_player_view_radius = 28  # The radius that the player can see
 g_check_around_player = True  # If True we will check from the point of view around the player.
+g_steps_fog_stays_around = 100  # The number of steps/moves that fog stays obstructed
+g_steps_half_fog_stays_around = 2  # The number of steps/moves that fog is gone until it becomes unvisited
 
 # Don't change these values...
 # Constants
@@ -132,11 +134,11 @@ class ColoredGridCanvas(Canvas):
 
 
 class ColoredGridNode(cocos.cocosnode.CocosNode):
-    def __init__(self, game_world, inverted, line_color):
+    def __init__(self, game_world, inverted, line_color, cache_size=16):
         super(ColoredGridNode, self).__init__()
 
         self.game_world = game_world
-        self.grid_squares = defaultdict(lambda: inverted)
+        self._grid_squares = defaultdict(lambda: (inverted, -1))
         self.squares_screen_space = defaultdict(lambda: True)
         self.inverted = inverted
 
@@ -160,6 +162,13 @@ class ColoredGridNode(cocos.cocosnode.CocosNode):
         for grid in self.grid_canvases:
             self.add(grid)
 
+    def grid_pos_is_active(self, grid_pos):
+        grid_visible, turn_visible = self._grid_squares[grid_pos]
+        return grid_visible if (
+            turn_visible < 0 or
+            turn_visible > self.game_world.current_turn
+        ) else not grid_visible
+
     def update_grid(self):
         win_size = director.get_window_size()
         grid_size = (win_size[0] / g_grid_size), (win_size[1] / g_grid_size)
@@ -172,7 +181,7 @@ class ColoredGridNode(cocos.cocosnode.CocosNode):
                 aligned_world_pos = align_pos_to_grid(self.game_world.point_to_local(world_pos))
 
                 grid_pos = world_to_grid(aligned_world_pos)
-                grid_visible = self.grid_squares[grid_pos]
+                grid_visible, num_turns_visible = self._grid_squares[grid_pos]
 
                 self.squares_screen_space[world_grid_pos] = grid_visible
 
@@ -180,8 +189,11 @@ class ColoredGridNode(cocos.cocosnode.CocosNode):
             if square.needs_update():
                 square.free()
 
-    def set_grid_pos_visible(self, grid_pos, is_visible):
-        self.grid_squares[tuple(grid_pos)] = is_visible if not self.inverted else not is_visible
+    def set_grid_pos_visible(self, grid_pos, is_visible, num_turns_visible=-1):
+        self._grid_squares[tuple(grid_pos)] = (
+            is_visible if not self.inverted else not is_visible,
+            num_turns_visible
+        )
 
 
 class FogOfWarNode(ColoredGridNode):
@@ -198,7 +210,7 @@ class FogOfWarNode(ColoredGridNode):
 
                 # Visible if anything is visible within a radius
                 fog_grid_pos = world_to_grid(aligned_world_pos)
-                fog_visible = self.grid_squares[fog_grid_pos]
+                fog_visible = self.grid_pos_is_active(fog_grid_pos)
 
                 if fog_visible:
                     radius = g_fog_neighbour_radius
@@ -207,7 +219,7 @@ class FogOfWarNode(ColoredGridNode):
                             break
                         for radius_y in xrange(-radius, radius + 1):
                             new_fog_grid_pos = tuple(fog_grid_pos + Point2(radius_x, radius_y))
-                            fog_visible = self.grid_squares[new_fog_grid_pos]
+                            fog_visible = self.grid_pos_is_active(new_fog_grid_pos)
                             if not fog_visible:
                                 break
 
@@ -218,13 +230,19 @@ class FogOfWarNode(ColoredGridNode):
                 square.free()
 
 
+class GameWorld(cocos.cocosnode.CocosNode):
+    def __init__(self):
+        super(GameWorld, self).__init__()
+        self.current_turn = 0
+
+
 class GameLayer(cocos.layer.Layer):
     is_event_handler = True  #: enable director.window events
 
     def __init__(self):
         super(GameLayer, self).__init__()
 
-        self.game_world = cocos.cocosnode.CocosNode()
+        self.game_world = GameWorld()
         self.add(self.game_world)
 
         self.keys_pressed = set()
@@ -233,15 +251,17 @@ class GameLayer(cocos.layer.Layer):
 
         # Fog of war Node
         self.fow = FogOfWarNode(self.game_world, inverted=True, line_color=(50, 50, 50, 255))
+        self.fow_visited = FogOfWarNode(self.game_world, inverted=True, line_color=(50, 50, 50, 128))
 
         # Full cover
-        self.full_cover = ColoredGridNode(self.game_world, inverted=False, line_color=(128, 128, 128, 255))
+        self.full_cover = ColoredGridNode(self.game_world, inverted=False, line_color=(128, 128, 128, 255),
+                                          cache_size=64)
 
         # Half cover
-        self.half_cover = ColoredGridNode(self.game_world, inverted=False, line_color=(50, 128, 50, 255))
+        self.half_cover = ColoredGridNode(self.game_world, inverted=False, line_color=(50, 128, 50, 255), cache_size=64)
 
         # Enemies
-        self.enemies = ColoredGridNode(self.game_world, inverted=False, line_color=(255, 108, 108, 255))
+        self.enemies = ColoredGridNode(self.game_world, inverted=False, line_color=(255, 108, 108, 255), cache_size=64)
 
         # Update camera
         self.update_camera()
@@ -267,8 +287,10 @@ class GameLayer(cocos.layer.Layer):
         self.add(self.half_cover)
         self.add(self.enemies)
         self.add(self.fow)
+        self.add(self.fow_visited)
 
         self.fow.update_grid()
+        self.fow_visited.update_grid()
         self.full_cover.update_grid()
         self.half_cover.update_grid()
         self.enemies.update_grid()
@@ -280,7 +302,7 @@ class GameLayer(cocos.layer.Layer):
         self.half_cover.set_grid_pos_visible(world_to_grid(position), True)
 
     def add_enemy(self, position):
-        self.enemies.set_grid_pos_visible(position, True)
+        self.enemies.set_grid_pos_visible(world_to_grid(position), True)
 
     @staticmethod
     def do_something_from_colors(colors, sprite, callback):
@@ -318,6 +340,7 @@ class GameLayer(cocos.layer.Layer):
             grid_pos = world_to_grid(self.player.position)
             new_pos = Point2(grid_pos[0], grid_pos[1]) + move_key_map[key]
             if self.is_valid_player_grid_pos(new_pos):
+                self.game_world.current_turn += 1
                 self.player.position = grid_to_world(new_pos)
 
                 # Do circle around player
@@ -329,7 +352,14 @@ class GameLayer(cocos.layer.Layer):
                             target_pos = new_pos + (x, y)
                             hit, hit_pos = self.raytrace(new_pos, target_pos, ignore_half_cover=True)
                             if hit:
-                                self.fow.set_grid_pos_visible(hit_pos, True)
+                                self.fow.set_grid_pos_visible(
+                                    hit_pos,
+                                    True,
+                                    self.game_world.current_turn + g_steps_fog_stays_around)
+                                self.fow_visited.set_grid_pos_visible(
+                                    hit_pos,
+                                    True,
+                                    self.game_world.current_turn + g_steps_half_fog_stays_around)
 
                             # Check from around the player if we can't see.
                             if hit and g_check_around_player:
@@ -347,12 +377,26 @@ class GameLayer(cocos.layer.Layer):
                                     if self.is_valid_player_grid_pos(new_pos + move):
                                         hit, hit_pos = self.raytrace(new_pos + move, target_pos, ignore_half_cover=True)
                                         if hit:
-                                            self.fow.set_grid_pos_visible(hit_pos, True)
+                                            self.fow.set_grid_pos_visible(
+                                                hit_pos,
+                                                True,
+                                                self.game_world.current_turn + g_steps_fog_stays_around)
+                                            self.fow_visited.set_grid_pos_visible(
+                                                hit_pos,
+                                                True,
+                                                self.game_world.current_turn + g_steps_half_fog_stays_around)
                                         elif not hit:
                                             break
 
                             if not hit:
-                                self.fow.set_grid_pos_visible(new_pos + (x, y), True)
+                                self.fow.set_grid_pos_visible(
+                                    new_pos + (x, y),
+                                    True,
+                                    self.game_world.current_turn + g_steps_fog_stays_around)
+                                self.fow_visited.set_grid_pos_visible(
+                                    new_pos + (x, y),
+                                    True,
+                                    self.game_world.current_turn + g_steps_half_fog_stays_around)
 
                 self.update_camera()
 
@@ -381,10 +425,11 @@ class GameLayer(cocos.layer.Layer):
             self.enemies.update_grid()
 
         self.fow.update_grid()
+        self.fow_visited.update_grid()
 
     def is_valid_player_grid_pos(self, grid_pos):
         grid_pos = tuple(int(v) for v in grid_pos)
-        return not self.full_cover.grid_squares[grid_pos] and not self.half_cover.grid_squares[grid_pos]
+        return not self.full_cover.grid_pos_is_active(grid_pos) and not self.half_cover.grid_pos_is_active(grid_pos)
 
     def raytrace(self, grid_pos_start, grid_pos_end, ignore_half_cover=False):
         if not g_should_trace_walls:
@@ -402,7 +447,8 @@ class GameLayer(cocos.layer.Layer):
         dy *= 2
 
         for _ in xrange(n):
-            if self.full_cover.grid_squares[(x, y)] or (not ignore_half_cover and self.half_cover[(x, y)]):
+            if self.full_cover.grid_pos_is_active((x, y)) or \
+                    (not ignore_half_cover and self.half_cover.grid_pos_is_active((x, y))):
                 return True, (x, y)  # We hit something
             if error > 0:
                 x += x_inc
